@@ -3,18 +3,42 @@ import torch.nn as nn
 import torch.nn.functional as F
 from pyro.distributions import NegativeBinomial, Categorical, MixtureSameFamily, DirichletMultinomial
 
-# --- Model definition ---
-class MixturePrediction(nn.Module):
-    def __init__(self, X, y, hidden_dim=256):
-        super(MixturePrediction, self).__init__()
-        self.mlp = nn.Sequential(
-            nn.Linear(X.shape[1], hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, y.shape[1])
-        )
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class RobustMixturePrediction(nn.Module):
+    def __init__(self, input_dim, output_dim, hidden_dim=256, mc_dropout=False, dropout_rate=0.2):
+        super(RobustMixturePrediction, self).__init__()
+        self.mc_dropout = mc_dropout
+
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.norm1 = nn.LayerNorm(hidden_dim)
+
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.norm2 = nn.LayerNorm(hidden_dim)
+
+        self.fc3 = nn.Linear(hidden_dim, output_dim)
+
+        self.dropout = nn.Dropout(dropout_rate)
 
     def forward(self, X):
-        logits = self.mlp(X)
+        x = F.relu(self.norm1(self.fc1(X)))
+
+        # Optional dropout before residual block
+        if self.mc_dropout or self.training:
+            x = self.dropout(x)
+
+        # Residual block with normalization
+        residual = x
+        x = F.relu(self.norm2(self.fc2(x)))
+        x = x + residual
+
+        # Optional dropout before output
+        if self.mc_dropout or self.training:
+            x = self.dropout(x)
+
+        logits = self.fc3(x)
         return F.softmax(logits, dim=-1)
 
 class MixtureToDirichlet(nn.Module):
